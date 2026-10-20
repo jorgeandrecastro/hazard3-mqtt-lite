@@ -1,14 +1,14 @@
 [package]
 name          = "embassy-mqtt-lite"
-version       = "0.3.0"
+version       = "0.4.0"
 edition       = "2024"
 authors       = ["Jorge Andre Castro <georgeandrec@gmail.com>"]
 license       = "GPL-2.0-or-later"
-description   = """Client MQTT v3.1.1 minimal, asynchrone, no_std. Supporte la QoS 0 (fire-and-forget), l'authentification username/password, le Last Will and Testament, et le keep-alive via PINGREQ, souscription (`SUBSCRIBE`) et la réception de messages (`PUBLISH` entrants). Fonctionne avec n'importe quel transport implémentant embedded_io_async::Read + Write tcp tls série...."""
+description   = """Client MQTT v3.1.1 minimal, asynchrone, no_std. Supporte la QoS 0 (fire-and-forget), l'authentification username/password, le Last Will and Testament, le keep-alive via PINGREQ, la souscription (`SUBSCRIBE`) et la réception de messages (`PUBLISH` entrants). TLS 1.3 optionnel avec CA épinglée (feature `tls`). Fonctionne avec n'importe quel transport implémentant embedded_io_async::Read + Write : tcp, tls, série...."""
 repository    = "https://github.com/jorgeandrecastro/embassy-mqtt-lite"
 documentation = "https://docs.rs/embassy-mqtt-lite"
 readme        = "README.md"
-keywords      = ["mqtt", "embassy", "no-std", "embedded", "async"]
+keywords      = ["mqtt", "embassy", "no-std", "embedded", "tls"]
 categories    = ["embedded", "no-std", "network-programming"]
 
 build        = false
@@ -24,6 +24,18 @@ path = "src/lib.rs"
 
 [dependencies]
 embedded-io-async = "0.7"
+embedded-tls      = { version = "0.19", default-features = false, features = ["rustpki"], optional = true }
+
+[dev-dependencies]
+embassy-futures = "0.1"
+
+[features]
+default     = []
+# TLS 1.3, certificat serveur vérifié contre une CA épinglée (ECDSA P-256).
+tls         = ["dep:embedded-tls"]
+# Chaînes de certificats ECDSA P-384 / Ed25519 en plus de P-256.
+tls-p384    = ["tls", "embedded-tls/p384"]
+tls-ed25519 = ["tls", "embedded-tls/ed25519"]
 
 [profile.release]
 opt-level     = "z"
