@@ -263,15 +263,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc2d050bdc5c21e0862a89256ed8029ae6c290a93aecefc73084b3002cdebb01"
 
 [[package]]
-name = "embassy-mqtt-lite"
-version = "0.4.0"
-dependencies = [
- "embassy-futures",
- "embedded-io-async",
- "embedded-tls",
-]
-
-[[package]]
 name = "embedded-io"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -368,6 +359,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "47d60b12902ba28e2730cd37e95b8c9223af2808df9e902d4df49588d1470606"
 dependencies = [
  "byteorder",
+]
+
+[[package]]
+name = "hazard3-mqtt-lite"
+version = "0.4.0"
+dependencies = [
+ "embassy-futures",
+ "embedded-io-async",
+ "embedded-tls",
 ]
 
 [[package]]

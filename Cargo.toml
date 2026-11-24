@@ -1,14 +1,13 @@
 [package]
-name          = "embassy-mqtt-lite"
+name          = "hazard3-mqtt-lite"
 version       = "0.4.0"
 edition       = "2024"
 authors       = ["Jorge Andre Castro <georgeandrec@gmail.com>"]
 license       = "GPL-2.0-or-later"
-description   = """Client MQTT v3.1.1 minimal, asynchrone, no_std. Supporte la QoS 0 (fire-and-forget), l'authentification username/password, le Last Will and Testament, le keep-alive via PINGREQ, la souscription (`SUBSCRIBE`) et la réception de messages (`PUBLISH` entrants). TLS 1.3 optionnel avec CA épinglée (feature `tls`). Fonctionne avec n'importe quel transport implémentant embedded_io_async::Read + Write : tcp, tls, série...."""
+description   = """Minimal asynchronous no_std MQTT v3.1.1 client for Hazard3. Supports QoS 0, authentication, Last Will, keep-alive, subscriptions and optional TLS 1.3. Works with any transport implementing embedded_io_async::Read + Write."""
 repository    = "https://github.com/jorgeandrecastro/embassy-mqtt-lite"
-documentation = "https://docs.rs/embassy-mqtt-lite"
 readme        = "README.md"
-keywords      = ["mqtt", "embassy", "no-std", "embedded", "tls"]
+keywords      = ["mqtt", "hazard3", "no-std", "embedded", "tls"]
 categories    = ["embedded", "no-std", "network-programming"]
 
 build        = false
@@ -19,7 +18,7 @@ autotests    = false
 autobenches  = false
 
 [lib]
-name = "embassy_mqtt_lite"
+name = "hazard3_mqtt_lite"
 path = "src/lib.rs"
 
 [dependencies]
@@ -31,9 +30,9 @@ embassy-futures = "0.1"
 
 [features]
 default     = []
-# TLS 1.3, certificat serveur vérifié contre une CA épinglée (ECDSA P-256).
+# TLS 1.3, server certificate verified against a pinned CA (ECDSA P-256).
 tls         = ["dep:embedded-tls"]
-# Chaînes de certificats ECDSA P-384 / Ed25519 en plus de P-256.
+# ECDSA P-384 / Ed25519 certificate chains in addition to P-256.
 tls-p384    = ["tls", "embedded-tls/p384"]
 tls-ed25519 = ["tls", "embedded-tls/ed25519"]
 

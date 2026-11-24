@@ -1,25 +1,24 @@
-//! TLS 1.3 pour [`MqttClient`](crate::MqttClient) (feature `tls`).
+//! TLS 1.3 for [`MqttClient`](crate::MqttClient) (feature `tls`).
 //!
-//! S'appuie sur [`embedded-tls`](https://crates.io/crates/embedded-tls) (TLS 1.3, `no_std`,
-//! sans allocateur) avec la vérification de certificat « rustpki ». Ce que cette couche garantit :
+//! Uses [`embedded-tls`](https://crates.io/crates/embedded-tls) (TLS 1.3, `no_std`,
+//! no allocator) with `rustpki` certificate verification. This layer guarantees:
 //!
-//! - **le certificat serveur est toujours vérifié** : chaîne jusqu'à la CA que tu fournis
-//!   (épinglée), signature `CertificateVerify`, et **nom d'hôte** (SAN DNS / CN). Il n'existe
-//!   volontairement aucun mode « sans vérification » dans cette crate ;
-//! - les dates de validité sont vérifiées si tu fournis une horloge
-//!   ([`connect_with_clock`]), sinon explicitement ignorées ([`connect_ignoring_dates`]) ;
-//! - aucun buffer sur la pile : les enregistrements TLS vivent dans [`TlsBuffers`], à placer
-//!   dans une `static` (`StaticCell`) ;
-//! - le transport reste à toi : passe `&mut socket`, tu le réutilises pour reconnecter.
+//! - **the server certificate is always verified**: chain to the supplied pinned CA,
+//!   `CertificateVerify` signature, and **hostname** (DNS SAN / CN). There is no
+//!   mode that disables verification;
+//! - validity dates are checked with a clock ([`connect_with_clock`]) or
+//!   explicitly ignored ([`connect_ignoring_dates`]);
+//! - TLS records use [`TlsBuffers`], which should be placed in a `static` (`StaticCell`);
+//! - the transport remains yours: pass `&mut socket` to reuse it for reconnection.
 //!
-//! # Utilisation
+//! # Usage
 //!
 //! ```ignore
-//! use embassy_mqtt_lite::{tls, MqttClient};
+//! use hazard3_mqtt_lite::{tls, MqttClient};
 //! use static_cell::StaticCell;
 //!
 //! static TLS_BUFFERS: StaticCell<tls::TlsBuffers> = StaticCell::new();
-//! // CA du broker au format DER (pas PEM) : openssl x509 -in ca.pem -outform DER -out ca.der
+//! // Broker CA in DER format (not PEM): openssl x509 -in ca.pem -outform DER -out ca.der
 //! static CA: &[u8] = include_bytes!("../certs/ca.der");
 //!
 //! let buffers = TLS_BUFFERS.init(tls::TlsBuffers::new());
@@ -30,24 +29,23 @@
 //! mqtt.connect("esp32-salon", 60).await?;
 //! mqtt.publish("capteurs/salon/temperature", b"21.5").await?;
 //! mqtt.disconnect().await?;
-//! tls.close().await.ok(); // envoie close_notify
+//! tls.close().await.ok(); // sends close_notify
 //! ```
 //!
-//! # Contraintes à connaître
+//! # Constraints
 //!
-//! - **CA privée ou épinglée recommandée.** Le vérificateur `no_std` gère ECDSA P-256 (toujours),
-//!   P-384 (feature `tls-p384`) et Ed25519 (feature `tls-ed25519`). Les chaînes RSA — typiquement
-//!   Let's Encrypt — ne sont pas supportées sans allocateur. Pour un broker maison : génère une
-//!   CA et un certificat serveur en P-256.
-//! - Le nom d'hôte doit être un **nom DNS** présent dans le SAN (ou le CN) du certificat.
-//! - Les certificats de la chaîne doivent tenir dans `CERT_SIZE` octets (2048 par défaut).
-//!   Un certificat plus gros fait échouer la poignée de main avec `TlsError::OutOfMemory`.
-//! - TLS 1.3 uniquement, suite `TLS_AES_128_GCM_SHA256` (obligatoire dans la RFC 8446, donc
-//!   offerte par tous les brokers TLS 1.3). Mosquitto ≥ 1.6 avec OpenSSL ≥ 1.1.1 convient.
-//! - `embedded-io-async` 0.7 : ton pile réseau doit utiliser la même version
-//!   (`embassy-net` ≥ 0.8).
-//! - Le nombre aléatoire (`rng`) doit être **cryptographique** (TRNG matériel : `esp-hal::rng::Trng`,
-//!   `embassy_rp::clocks::RoscRng`, RNG du STM32…), pas un PRNG déterministe.
+//! - **A private or pinned CA is recommended.** The `no_std` verifier supports ECDSA P-256,
+//!   P-384 (feature `tls-p384`) and Ed25519 (feature `tls-ed25519`). RSA chains, including
+//!   Let's Encrypt, are not supported without an allocator. For a self-hosted broker,
+//!   generate a P-256 CA and server certificate.
+//! - The hostname must be a **DNS name** present in the certificate's SAN (or CN).
+//! - Chain certificates must fit in `CERT_SIZE` bytes (2048 by default). A larger
+//!   certificate causes the handshake to fail with `TlsError::OutOfMemory`.
+//! - TLS 1.3 only, with `TLS_AES_128_GCM_SHA256` (mandatory in RFC 8446).
+//!   Mosquitto 1.6 or later with OpenSSL 1.1.1 or later is suitable.
+//! - The network stack must use `embedded-io-async` 0.7.
+//! - The random number generator (`rng`) must be **cryptographic** (a hardware TRNG),
+//!   not a deterministic PRNG.
 
 use embedded_io_async::{Read, Write};
 use embedded_tls::pki::CertVerifier;
@@ -57,19 +55,19 @@ pub use embedded_tls::{
     Aes128GcmSha256, CryptoRngCore, NoClock, TlsClock, TlsConnection, TlsError,
 };
 
-/// Taille d'un enregistrement TLS maximal : 16 384 octets de données + 256 d'en-têtes / MAC.
+/// Maximum TLS record size: 16,384 bytes of data plus 256 bytes of headers and MAC.
 ///
-/// Avec un buffer de lecture plus petit, certains enregistrements du serveur ne peuvent pas
-/// être décodés (la poignée de main ou un message peut alors échouer de façon intermittente).
+/// With a smaller read buffer, some server records cannot be decoded, potentially
+/// causing intermittent handshake or message failures.
 pub const TLS_RECORD_SIZE: usize = 16_640;
 
-/// Taille par défaut (octets) réservée à un certificat serveur : voir `CERT_SIZE`.
+/// Default size in bytes reserved for a server certificate: see `CERT_SIZE`.
 pub const DEFAULT_CERT_SIZE: usize = 2048;
 
-/// Buffers d'enregistrements TLS (lecture + écriture), ~32 Kio.
+/// TLS record buffers (read and write), approximately 32 KiB.
 ///
-/// Trop gros pour une pile de tâche embarquée : place-le dans une `static`
-/// (`StaticCell<TlsBuffers>`). Réutilisable d'une connexion à l'autre.
+/// Too large for an embedded task stack: place in a `static`
+/// (`StaticCell<TlsBuffers>`). Reusable across connections.
 pub struct TlsBuffers<const N: usize = TLS_RECORD_SIZE> {
     read: [u8; N],
     write: [u8; N],
@@ -90,28 +88,28 @@ impl<const N: usize> Default for TlsBuffers<N> {
     }
 }
 
-/// Paramètres de vérification du serveur.
+/// Server verification settings.
 #[derive(Clone, Copy)]
 pub struct TlsSettings<'a> {
-    /// Nom DNS du broker, tel qu'il figure dans son certificat (SAN / CN).
-    /// Envoyé en SNI **et** comparé au certificat.
+    /// Broker DNS name as it appears in its certificate (SAN / CN).
+    /// Sent as SNI **and** compared with the certificate.
     pub server_name: &'a str,
-    /// Certificat de la CA de confiance, **au format DER** (pas PEM).
+    /// Trusted CA certificate in **DER format** (not PEM).
     pub ca_der: &'a [u8],
 }
 
-/// Erreurs de [`connect_with_clock`] / [`connect_ignoring_dates`].
+/// Errors from [`connect_with_clock`] / [`connect_ignoring_dates`].
 #[derive(Debug, Clone, Copy)]
 pub enum TlsConnectError {
-    /// `server_name` vide, ou `ca_der` vide / qui n'est pas du DER (un PEM commence par `-----BEGIN`).
+    /// Empty `server_name`, or empty/non-DER `ca_der` (PEM starts with `-----BEGIN`).
     InvalidSettings,
-    /// La poignée de main TLS a échoué (voir [`is_certificate_error`](Self::is_certificate_error)).
+    /// TLS handshake failed (see [`is_certificate_error`](Self::is_certificate_error)).
     Handshake(TlsError),
 }
 
 impl TlsConnectError {
-    /// `true` si l'échec vient du certificat du serveur (chaîne, signature, nom, dates) :
-    /// inutile de réessayer en boucle, c'est une erreur de configuration — ou une attaque.
+    /// Returns `true` for server certificate failures (chain, signature, name, dates).
+    /// Repeated retries are not useful: this indicates misconfiguration or an attack.
     pub fn is_certificate_error(&self) -> bool {
         matches!(
             self,
@@ -143,7 +141,7 @@ fn validate_settings(settings: &TlsSettings<'_>) -> Result<(), TlsConnectError> 
     Ok(())
 }
 
-/// Fournisseur cryptographique : RNG + vérificateur à CA épinglée, sans authentification client.
+/// Cryptographic provider: RNG and pinned-CA verifier, without client authentication.
 struct PinnedCaProvider<'a, RNG, Clock: TlsClock, const CERT_SIZE: usize> {
     rng: RNG,
     verifier: CertVerifier<'a, Aes128GcmSha256, Clock, CERT_SIZE>,
@@ -168,14 +166,14 @@ where
     }
 }
 
-/// Ouvre une session TLS 1.3 en vérifiant le certificat serveur **y compris ses dates**
-/// avec l'horloge `Clock` (secondes depuis l'epoch Unix, voir [`TlsClock`]).
+/// Opens a TLS 1.3 session and verifies the server certificate **including its dates**
+/// using `Clock` (seconds since the Unix epoch; see [`TlsClock`]).
 ///
-/// Utilise cette variante dès que ton appareil connaît l'heure (SNTP, RTC) : elle refuse les
-/// certificats expirés ou pas encore valides.
+/// Use this when the device knows the time (SNTP, RTC): it rejects expired and
+/// not-yet-valid certificates.
 ///
-/// `CERT_SIZE` : octets réservés à un certificat de la chaîne (2048 suffit en général,
-/// cf. [`DEFAULT_CERT_SIZE`]). Passe `&mut socket` pour garder la main sur le transport.
+/// `CERT_SIZE` is the number of bytes reserved for one chain certificate (2048 is
+/// generally enough; see [`DEFAULT_CERT_SIZE`]). Pass `&mut socket` to retain the transport.
 pub async fn connect_with_clock<'a, S, RNG, Clock, const CERT_SIZE: usize, const N: usize>(
     socket: S,
     buffers: &'a mut TlsBuffers<N>,
@@ -200,11 +198,11 @@ where
     Ok(tls)
 }
 
-/// Comme [`connect_with_clock`] mais **sans contrôle des dates** de validité.
+/// Like [`connect_with_clock`] but **without checking validity dates**.
 ///
-/// Pour les appareils sans RTC ni SNTP au démarrage. La chaîne, les signatures et le nom
-/// d'hôte restent entièrement vérifiés ; seul un certificat **expiré** serait accepté.
-/// Dès que l'heure est connue, préfère [`connect_with_clock`].
+/// For devices without RTC or SNTP at startup. The chain, signatures and hostname
+/// are still verified, but expired or not-yet-valid certificates may be accepted.
+/// Prefer [`connect_with_clock`] once the time is known.
 pub async fn connect_ignoring_dates<'a, S, RNG, const N: usize>(
     socket: S,
     buffers: &'a mut TlsBuffers<N>,

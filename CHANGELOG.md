@@ -1,55 +1,85 @@
 # Changelog
 
-Toutes les modifications notables de `embassy-mqtt-lite` sont consignées dans ce fichier.
+Notable changes to `hazard3-mqtt-lite` are documented in this file.
 
-Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le projet respecte le [versionnement sémantique](https://semver.org/lang/fr/).
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
+and the project follows [Semantic Versioning](https://semver.org/).
+
+## Unreleased
+
+### Changed
+
+- Renamed the package to `hazard3-mqtt-lite` and the Rust crate to
+  `hazard3_mqtt_lite` for [Hazard3](https://github.com/jorgeandrecastro/Hazard3).
+- Translated the documentation into English and made the examples independent
+  of a particular network stack or executor.
 
 ## [0.4.0] - 2026-10-20
 
-### Ajouté
+### Added
 
-- **TLS 1.3** via la feature `tls` (module `tls`, basé sur `embedded-tls` 0.19) : certificat serveur toujours vérifié (chaîne jusqu'à une CA épinglée, signature, nom d'hôte).
-  - `tls::connect_with_clock` : vérifie aussi les dates de validité à partir d'une horloge `TlsClock`.
-  - `tls::connect_ignoring_dates` : pour les appareils sans horloge ; seules les dates ne sont pas contrôlées.
-  - `tls::TlsBuffers`, `tls::TlsSettings`, `tls::TlsConnectError` (avec `is_certificate_error()`).
-  - Rejet des paramètres invalides avant toute I/O (nom de serveur vide, CA au format PEM).
-- Features `tls-p384` et `tls-ed25519` pour les chaînes de certificats ECDSA P-384 et Ed25519 (ECDSA P-256 est toujours supporté).
-- `MqttClient::disconnect()` : envoie un `DISCONNECT` pour une fermeture propre (le Last Will n'est pas publié).
-- `MqttClient::publish_retained()` : publication avec le drapeau `RETAIN`.
-- Variantes d'erreur `MqttError::ConnectionClosed`, `MqttError::InvalidTopic` et `MqttError::InvalidOptions`.
-- Validation des topics : les noms de publication n'acceptent ni wildcard, ni topic vide, ni caractère NUL ; les filtres de souscription respectent les règles de `+` et `#` de la spécification.
-- Tests sur transport simulé (`embassy-futures` en `dev-dependency`) : 55 tests au total, contre 15 auparavant.
+- **TLS 1.3** via the `tls` feature (`tls` module, based on `embedded-tls`
+  0.19): the server certificate is always verified, including the chain to a
+  pinned CA, signature and hostname.
+  - `tls::connect_with_clock`: also verifies validity dates using a `TlsClock`.
+  - `tls::connect_ignoring_dates`: for devices without a clock; only the dates
+    are unchecked.
+  - `tls::TlsBuffers`, `tls::TlsSettings` and `tls::TlsConnectError` (with
+    `is_certificate_error()`).
+  - Invalid settings (empty server name, PEM CA) are rejected before I/O.
+- `tls-p384` and `tls-ed25519` features for ECDSA P-384 and Ed25519
+  certificate chains; ECDSA P-256 is always supported.
+- `MqttClient::disconnect()`: sends DISCONNECT for a clean shutdown without
+  publishing the Last Will.
+- `MqttClient::publish_retained()`: publishes with the RETAIN flag.
+- `MqttError::ConnectionClosed`, `MqttError::InvalidTopic` and
+  `MqttError::InvalidOptions` error variants.
+- Topic validation: publish names cannot contain wildcards or NUL and cannot
+  be empty; subscription filters follow the specification's `+` and `#` rules.
+- Mock transport tests (`embassy-futures` as a development dependency):
+  55 tests in total, up from 15.
 
-### Modifié
+### Changed
 
-- **Rupture** : `MqttError` est désormais `#[non_exhaustive]` ; les `match` exhaustifs doivent prévoir une branche `_`.
-- **Rupture** : les erreurs de lecture du transport ne sont plus ramenées à `ConnackInvalid`, `PingFailed`, `SubackInvalid` ou `UnexpectedPacket` : une fin de flux donne `ConnectionClosed`, une erreur du transport donne `Io(e)`.
-- Chaque envoi est suivi d'un `flush()` du transport, indispensable avec TLS qui met les écritures en tampon.
-- Le payload d'un `PUBLISH` est envoyé directement depuis le buffer de l'appelant, sans copie : `MAX_PACKET_SIZE` ne limite plus que les en-têtes (identifiant client, identifiants, Last Will, topic).
-- Le `CONNACK` est validé strictement (octet de flags réservé, code de retour).
-- Le `SUBACK` est validé strictement : identifiant de paquet, longueur et code de retour (`0x00..=0x02` accepté, `0x80` refusé, tout autre code invalide).
-- `subscribe()` ignore les paquets parasites (par exemple un `PINGRESP`) reçus avant le `SUBACK`, dans la limite de 8 paquets.
-- `connect_with_options()` refuse un mot de passe sans nom d'utilisateur (`InvalidOptions`) et valide le topic du Last Will.
-- La lecture de la « Remaining Length » est limitée à 4 octets, conformément à la spécification.
-- Le code est réparti en trois fichiers : `packet.rs` (codec pur), `lib.rs` (client), `tls.rs` (TLS).
-- `Cargo.toml` : `embedded-tls` ajouté en dépendance optionnelle.
+- **Breaking**: `MqttError` is now `#[non_exhaustive]`; exhaustive matches
+  must include a `_` arm.
+- **Breaking**: transport read errors are no longer converted to
+  `ConnackInvalid`, `PingFailed`, `SubackInvalid` or `UnexpectedPacket`.
+  End of stream returns `ConnectionClosed`; a transport error returns `Io(e)`.
+- Each send is followed by a transport `flush()`, required for buffered TLS writes.
+- PUBLISH payloads are sent directly from the caller's buffer without copying.
+  `MAX_PACKET_SIZE` limits only headers (client ID, credentials, Last Will and topic).
+- CONNACK is validated strictly, including the reserved flag byte and return code.
+- SUBACK is validated strictly: packet ID, length and return code (`0x00..=0x02`
+  accepted, `0x80` refused, all other codes invalid).
+- `subscribe()` ignores up to eight unrelated packets, such as PINGRESP,
+  received before SUBACK.
+- `connect_with_options()` rejects passwords without usernames (`InvalidOptions`)
+  and validates the Last Will topic.
+- Remaining Length is limited to four bytes, as required by the specification.
+- Code is split into `packet.rs` (pure codec), `lib.rs` (client) and `tls.rs` (TLS).
+- Added `embedded-tls` as an optional dependency.
 
-### Corrigé
+### Fixed
 
-- `receive()` : un `PUBLISH` plus grand que le buffer fourni laissait le flux désynchronisé. Le message est désormais lu en entier puis ignoré, `PacketTooLarge` est renvoyée et la connexion reste utilisable.
+- `receive()`: a PUBLISH larger than the supplied buffer previously left the
+  stream out of sync. The message is now fully read and discarded,
+  `PacketTooLarge` is returned, and the connection remains usable.
 
 ## [0.3.0]
 
-### Ajouté
+### Added
 
-- Souscription (`SUBSCRIBE` / `SUBACK`) et réception des messages `PUBLISH` entrants (`subscribe()`, `receive()`).
+- Subscription (SUBSCRIBE / SUBACK) and receipt of incoming PUBLISH messages
+  via `subscribe()` and `receive()`.
 
-## Versions antérieures
+## Earlier versions
 
-- Connexion MQTT 3.1.1 (`CONNECT` / `CONNACK`) en Clean Session, avec authentification username/password et Last Will and Testament.
-- Publication en QoS 0.
-- Keep-alive via `PINGREQ` / `PINGRESP`.
-- Client `no_std`, sans allocation dynamique, agnostique du transport (`embedded_io_async::Read + Write`).
+- MQTT 3.1.1 CONNECT / CONNACK with Clean Session, username/password
+  authentication and Last Will and Testament.
+- QoS 0 publishing.
+- Keep-alive with PINGREQ / PINGRESP.
+- `no_std` client without dynamic allocation, independent of the transport
+  (`embedded_io_async::Read + Write`).
 
-[0.4.0]: https://github.com/jorgeandrecastro/embassy-mqtt-lite/compare/v0.3.0...v0.4.0
-[0.3.0]: https://github.com/jorgeandrecastro/embassy-mqtt-lite/releases/tag/v0.3.0
+

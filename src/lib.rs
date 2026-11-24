@@ -1,19 +1,18 @@
 #![no_std]
 
-//! Client MQTT v3.1.1 minimal, asynchrone, `no_std`.
+//! Minimal asynchronous `no_std` MQTT v3.1.1 client.
 //!
-//! Supporte la QoS 0 (fire-and-forget), l'authentification username/password,
-//! le Last Will and Testament, le keep-alive via PINGREQ, ainsi que la
-//! souscription (`SUBSCRIBE`) et la réception de messages (`PUBLISH` entrants).
-//! Fonctionne avec n'importe quel transport implémentant
-//! `embedded_io_async::Read + Write` (TCP, TLS, série...).
+//! Supports QoS 0 (fire-and-forget), username/password authentication,
+//! Last Will and Testament, keep-alive via PINGREQ, subscriptions (`SUBSCRIBE`)
+//! and incoming messages (`PUBLISH`). Works with any transport implementing
+//! `embedded_io_async::Read + Write` (TCP, TLS, serial, etc.).
 //!
 //! # Organisation
 //!
-//! - `packet` : codec pur (construction / analyse des paquets), testable sur l'hôte.
-//! - `lib.rs` (ce fichier) : [`MqttClient`] et [`MqttError`], la partie I/O.
-//! - `tls` (feature `tls`) : TLS 1.3 avec vérification du certificat serveur
-//!   contre une CA épinglée, voir le module `tls`.
+//! - `packet`: pure packet codec, testable on the host.
+//! - `lib.rs` (this file): [`MqttClient`] and [`MqttError`], the I/O layer.
+//! - `tls` (feature `tls`): TLS 1.3 with server certificate verification
+//!   against a pinned CA.
 
 use embedded_io_async::{Read, ReadExactError, Write};
 
@@ -30,35 +29,35 @@ use packet::{
     publish_layout, BuildError, ConnackResult, SubackResult, DISCONNECT, PINGREQ, PINGRESP,
 };
 
-/// Erreurs possibles lors de l'utilisation du client MQTT.
+/// Errors that may occur when using the MQTT client.
 ///
-/// Sauf [`PacketTooLarge`](MqttError::PacketTooLarge) renvoyée par
-/// [`receive`](MqttClient::receive) (voir sa doc), toute erreur doit être considérée comme
-/// fatale pour la connexion : ferme le transport et reconnecte-toi.
+/// Except for [`PacketTooLarge`](MqttError::PacketTooLarge) returned by
+/// [`receive`](MqttClient::receive), treat every error as fatal to the connection:
+/// close the transport and reconnect.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum MqttError<E> {
-    /// Erreur de transport (TCP, TLS, etc.)
+    /// Transport error (TCP, TLS, etc.).
     Io(E),
-    /// Le transport a été fermé par le pair (fin de flux inattendue).
+    /// The peer closed the transport (unexpected end of stream).
     ConnectionClosed,
-    /// Le paquet à construire (ou reçu) dépasse la taille disponible.
+    /// The outgoing or received packet exceeds the available size.
     PacketTooLarge,
-    /// Nom de topic ou filtre invalide (vide, caractère NUL, wildcard mal placé…).
+    /// Invalid topic name or filter (empty, NUL character, misplaced wildcard, etc.).
     InvalidTopic,
-    /// Options de connexion incohérentes (mot de passe sans nom d'utilisateur).
+    /// Invalid connection options (password without username).
     InvalidOptions,
-    /// Le broker n'a pas répondu par un CONNACK valide.
+    /// The broker did not respond with a valid CONNACK.
     ConnackInvalid,
-    /// Le broker a explicitement refusé la connexion (code de retour CONNACK non nul).
+    /// The broker refused the connection (nonzero CONNACK return code).
     ConnectionRefused(u8),
-    /// La réponse au PINGREQ n'est pas un PINGRESP valide.
+    /// The PINGREQ response is not a valid PINGRESP.
     PingFailed,
-    /// Le SUBACK reçu est invalide ou mal formé.
+    /// The received SUBACK is invalid or malformed.
     SubackInvalid,
-    /// Le broker a refusé la souscription (code de retour SUBACK = 0x80).
+    /// The broker refused the subscription (SUBACK return code 0x80).
     SubscribeFailed,
-    /// Paquet entrant inattendu ou mal formé.
+    /// Unexpected or malformed incoming packet.
     UnexpectedPacket,
 }
 
@@ -68,8 +67,8 @@ impl<E> From<E> for MqttError<E> {
     }
 }
 
-/// Convertit une erreur de construction de paquet (pas de `From` : il entrerait en
-/// conflit avec `From<E> for MqttError<E>`).
+/// Converts a packet construction error (`From` would conflict with
+/// `From<E> for MqttError<E>`).
 fn build_err<E>(e: BuildError) -> MqttError<E> {
     match e {
         BuildError::TooLarge => MqttError::PacketTooLarge,
@@ -78,7 +77,7 @@ fn build_err<E>(e: BuildError) -> MqttError<E> {
     }
 }
 
-/// Distingue une fin de flux (`ConnectionClosed`) d'une vraie erreur de transport.
+/// Distinguishes end of stream (`ConnectionClosed`) from a transport error.
 fn read_err<E>(e: ReadExactError<E>) -> MqttError<E> {
     match e {
         ReadExactError::UnexpectedEof => MqttError::ConnectionClosed,
@@ -86,14 +85,14 @@ fn read_err<E>(e: ReadExactError<E>) -> MqttError<E> {
     }
 }
 
-/// Client MQTT minimal opérant sur un transport `Read + Write` fourni par l'appelant.
+/// Minimal MQTT client using a caller-provided `Read + Write` transport.
 pub struct MqttClient<'a, T: Read + Write> {
     transport: &'a mut T,
     packet_id: u16,
 }
 
 impl<'a, T: Read + Write> MqttClient<'a, T> {
-    /// Crée un nouveau client autour d'un transport déjà connecté (socket TCP, session TLS…)
+    /// Creates a client around an already connected transport (TCP socket, TLS session, etc.).
     pub fn new(transport: &'a mut T) -> Self {
         Self {
             transport,
@@ -101,10 +100,10 @@ impl<'a, T: Read + Write> MqttClient<'a, T> {
         }
     }
 
-    /// Envoie plusieurs morceaux puis **flush** le transport.
+    /// Sends several chunks and then **flushes** the transport.
     ///
-    /// Le flush est indispensable avec TLS : `embedded-tls` met les écritures en tampon
-    /// et ne chiffre / n'émet l'enregistrement qu'au `flush`.
+    /// Flushing is essential with TLS: `embedded-tls` buffers writes and only
+    /// encrypts and sends the record on `flush`.
     async fn send(&mut self, parts: &[&[u8]]) -> Result<(), MqttError<T::Error>> {
         for part in parts {
             self.transport.write_all(part).await?;
@@ -113,8 +112,8 @@ impl<'a, T: Read + Write> MqttClient<'a, T> {
         Ok(())
     }
 
-    /// Envoie un paquet CONNECT (Clean Session) et attend le CONNACK.
-    /// Version simple, sans authentification ni Last Will.
+    /// Sends CONNECT (Clean Session) and waits for CONNACK.
+    /// This simple version uses neither authentication nor a Last Will.
     pub async fn connect(
         &mut self,
         client_id: &str,
@@ -124,7 +123,7 @@ impl<'a, T: Read + Write> MqttClient<'a, T> {
             .await
     }
 
-    /// Envoie un paquet CONNECT avec options (authentification, Last Will) et attend le CONNACK.
+    /// Sends CONNECT with options (authentication, Last Will) and waits for CONNACK.
     pub async fn connect_with_options(
         &mut self,
         client_id: &str,
@@ -147,16 +146,16 @@ impl<'a, T: Read + Write> MqttClient<'a, T> {
         }
     }
 
-    /// Publie un message en QoS 0 (fire-and-forget) sur le topic donné.
+    /// Publishes a QoS 0 message (fire-and-forget) to the given topic.
     ///
-    /// Le payload est envoyé directement depuis `payload` (sans copie) : sa taille
-    /// n'est pas limitée par [`MAX_PACKET_SIZE`].
+    /// The payload is sent directly from `payload` without copying; its size is
+    /// not limited by [`MAX_PACKET_SIZE`].
     pub async fn publish(&mut self, topic: &str, payload: &[u8]) -> Result<(), MqttError<T::Error>> {
         self.publish_inner(topic, payload, false).await
     }
 
-    /// Comme [`publish`](Self::publish) avec le drapeau RETAIN : le broker conserve
-    /// le message et le délivre aux futurs abonnés (typiquement un statut `online`).
+    /// Like [`publish`](Self::publish), with RETAIN: the broker stores the message
+    /// and delivers it to future subscribers (typically an `online` status).
     pub async fn publish_retained(
         &mut self,
         topic: &str,
@@ -175,14 +174,14 @@ impl<'a, T: Read + Write> MqttClient<'a, T> {
         self.send(&[header.as_slice(), payload]).await
     }
 
-    /// Envoie un PINGREQ et attend le PINGRESP correspondant.
+    /// Sends a PINGREQ and waits for the corresponding PINGRESP.
     ///
-    /// À appeler périodiquement (avant l'expiration du `keep_alive_secs` négocié
-    /// lors de `connect`) si aucune autre activité (PUBLISH) n'a lieu sur la
-    /// connexion, pour éviter que le broker ne considère le client comme mort.
+    /// Call periodically before the `keep_alive_secs` negotiated at `connect`
+    /// expires if there is no other activity (PUBLISH) on the connection, so
+    /// the broker does not consider the client dead.
     ///
-    /// Ne l'appelle pas pendant qu'un [`receive`](Self::receive) est en attente sur la
-    /// même connexion : [`receive`](Self::receive) consomme lui-même les PINGRESP.
+    /// Do not call while [`receive`](Self::receive) is pending on the same
+    /// connection: [`receive`](Self::receive) consumes PINGRESP packets itself.
     pub async fn ping(&mut self) -> Result<(), MqttError<T::Error>> {
         self.send(&[&PINGREQ]).await?;
 
@@ -198,15 +197,15 @@ impl<'a, T: Read + Write> MqttClient<'a, T> {
         Ok(())
     }
 
-    /// Envoie un DISCONNECT : fermeture propre, le broker **ne** publie **pas** le Last Will.
+    /// Sends DISCONNECT for a clean shutdown; the broker does **not** publish the Last Will.
     ///
-    /// Ferme ensuite le transport toi-même (avec TLS : `tls.close().await`, qui envoie
-    /// l'alerte `close_notify`).
+    /// Then close the transport yourself (with TLS: `tls.close().await`, which sends
+    /// the `close_notify` alert).
     pub async fn disconnect(&mut self) -> Result<(), MqttError<T::Error>> {
         self.send(&[&DISCONNECT]).await
     }
 
-    /// Lit une "Remaining Length" depuis le réseau (l'inverse de `encode_remaining_length`).
+    /// Reads a Remaining Length from the network (inverse of `encode_remaining_length`).
     async fn read_remaining_length(&mut self) -> Result<usize, MqttError<T::Error>> {
         let mut multiplier: usize = 1;
         let mut value: usize = 0;
@@ -226,7 +225,7 @@ impl<'a, T: Read + Write> MqttClient<'a, T> {
         Err(MqttError::UnexpectedPacket)
     }
 
-    /// Lit et jette `n` octets pour rester synchronisé avec le flux.
+    /// Reads and discards `n` bytes to remain synchronized with the stream.
     async fn discard(&mut self, mut n: usize) -> Result<(), MqttError<T::Error>> {
         let mut scratch = [0u8; 32];
         while n > 0 {
@@ -240,9 +239,9 @@ impl<'a, T: Read + Write> MqttClient<'a, T> {
         Ok(())
     }
 
-    /// Souscrit à un topic en QoS 0 et attend la confirmation SUBACK.
+    /// Subscribes to a topic with QoS 0 and waits for SUBACK.
     ///
-    /// Les paquets non-SUBACK reçus entre-temps (PINGRESP…) sont ignorés.
+    /// Other packets received in the meantime (PINGRESP, etc.) are ignored.
     pub async fn subscribe(&mut self, topic: &str) -> Result<(), MqttError<T::Error>> {
         let packet_id = self.packet_id.wrapping_add(1).max(1);
         let packet = build_subscribe_packet(topic, packet_id).map_err(build_err)?;
@@ -280,13 +279,13 @@ impl<'a, T: Read + Write> MqttClient<'a, T> {
         Err(MqttError::SubackInvalid)
     }
 
-    /// Attend et retourne le prochain message PUBLISH reçu du broker.
+    /// Waits for and returns the next PUBLISH message from the broker.
     ///
-    /// Les autres paquets (PINGRESP…) sont consommés silencieusement.
+    /// Other packets (PINGRESP, etc.) are silently consumed.
     ///
-    /// Si un PUBLISH dépasse `buf`, il est **entièrement lu et jeté** puis
-    /// [`MqttError::PacketTooLarge`] est renvoyée : le flux reste synchronisé et tu peux
-    /// rappeler `receive` sur la même connexion.
+    /// If a PUBLISH exceeds `buf`, it is **fully read and discarded**, then
+    /// [`MqttError::PacketTooLarge`] is returned. The stream remains synchronized
+    /// and `receive` can be called again on the same connection.
     pub async fn receive<'buf>(
         &mut self,
         buf: &'buf mut [u8],
@@ -343,7 +342,7 @@ mod tests {
     use embedded_io_async::ErrorType;
     use std::vec::Vec;
 
-    /// Transport simulé : `rx` = octets que le "broker" enverra, `tx` = ce que le client a écrit.
+    /// Mock transport: `rx` contains broker bytes, `tx` contains client writes.
     struct Mock {
         rx: Vec<u8>,
         pos: usize,

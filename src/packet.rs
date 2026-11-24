@@ -1,37 +1,37 @@
-//! Encodage / décodage des paquets MQTT v3.1.1 — fonctions pures, sans I/O.
+//! MQTT v3.1.1 packet encoding and decoding: pure functions without I/O.
 //!
-//! Tout ce module est testable sur l'hôte (`cargo test`) sans transport ni runtime.
+//! This module can be tested on the host without a transport or runtime.
 
-/// Taille maximale (en octets) d'un en-tête de paquet construit par cette crate
-/// (CONNECT complet, SUBSCRIBE, ou en-tête + topic d'un PUBLISH).
+/// Maximum size in bytes of a packet header built by this crate
+/// (complete CONNECT, SUBSCRIBE, or PUBLISH header and topic).
 ///
-/// Le **payload** d'un PUBLISH n'est plus copié dans ce buffer : il est envoyé
-/// directement au transport, sa taille n'est donc plus limitée par cette constante.
-/// Augmente-la si tu as des client_id / topics / identifiants très longs.
+/// A PUBLISH **payload** is sent directly to the transport, not copied into
+/// this buffer, so its size is not limited by this constant.
+/// Increase it for very long client IDs, topics or credentials.
 pub const MAX_PACKET_SIZE: usize = 256;
 
-/// Plus grande valeur encodable dans le champ "Remaining Length" (4 octets, MQTT 3.1.1 §2.2.3).
+/// Largest encodable Remaining Length (4 bytes, MQTT 3.1.1 section 2.2.3).
 pub const MAX_REMAINING_LENGTH: usize = 268_435_455;
 
-/// Paquet PINGREQ complet.
+/// Complete PINGREQ packet.
 pub(crate) const PINGREQ: [u8; 2] = [0xC0, 0x00];
-/// Paquet PINGRESP attendu.
+/// Expected PINGRESP packet.
 pub(crate) const PINGRESP: [u8; 2] = [0xD0, 0x00];
-/// Paquet DISCONNECT complet.
+/// Complete DISCONNECT packet.
 pub(crate) const DISCONNECT: [u8; 2] = [0xE0, 0x00];
 
-/// Erreur de construction d'un paquet.
+/// Packet construction error.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BuildError {
-    /// Le paquet dépasse `MAX_PACKET_SIZE` (ou `MAX_REMAINING_LENGTH`).
+    /// The packet exceeds `MAX_PACKET_SIZE` (or `MAX_REMAINING_LENGTH`).
     TooLarge,
-    /// Nom de topic / filtre invalide (vide, NUL, wildcard mal placé…).
+    /// Invalid topic name or filter (empty, NUL, misplaced wildcard, etc.).
     InvalidTopic,
-    /// Combinaison d'options interdite par la spec (mot de passe sans username).
+    /// Combination forbidden by the specification (password without username).
     InvalidOptions,
 }
 
-/// Options de connexion optionnelles : authentification et Last Will.
+/// Optional connection settings: authentication and Last Will.
 #[derive(Default)]
 pub struct ConnectOptions<'a> {
     pub username: Option<&'a str>,
@@ -39,21 +39,21 @@ pub struct ConnectOptions<'a> {
     pub last_will: Option<LastWill<'a>>,
 }
 
-/// Message publié automatiquement par le broker si la connexion est perdue
-/// de manière anormale (crash, coupure secteur, timeout keep-alive).
+/// Message automatically published by the broker after an abnormal connection loss
+/// (crash, power failure, keep-alive timeout).
 pub struct LastWill<'a> {
     pub topic: &'a str,
     pub message: &'a [u8],
     pub retain: bool,
 }
 
-/// Message reçu du broker sur un topic souscrit.
+/// Message received from the broker on a subscribed topic.
 pub struct IncomingMessage<'buf> {
     pub topic: &'buf str,
     pub payload: &'buf [u8],
 }
 
-/// Buffer de construction de paquet, taille fixe, sans allocation dynamique.
+/// Fixed-size packet construction buffer without dynamic allocation.
 pub(crate) struct PacketBuilder {
     buf: [u8; MAX_PACKET_SIZE],
     len: usize,
@@ -94,7 +94,7 @@ impl PacketBuilder {
     }
 }
 
-/// Encode la "Remaining Length" au format variable-length du protocole MQTT.
+/// Encodes the MQTT Remaining Length in variable-length format.
 pub(crate) fn encode_remaining_length(
     mut len: usize,
     out: &mut PacketBuilder,
@@ -116,14 +116,14 @@ pub(crate) fn encode_remaining_length(
     Ok(())
 }
 
-/// Ajoute un champ MQTT "UTF-8 string" / "binary data" (préfixé de sa longueur sur 2 octets).
+/// Adds an MQTT UTF-8 string or binary data field with a two-byte length prefix.
 pub(crate) fn push_string_field(builder: &mut PacketBuilder, s: &[u8]) -> Result<(), BuildError> {
     let len = u16::try_from(s.len()).map_err(|_| BuildError::TooLarge)?;
     builder.extend(&len.to_be_bytes())?;
     builder.extend(s)
 }
 
-/// Un nom de topic de PUBLISH : non vide, sans NUL, sans wildcard (§4.7.3).
+/// A PUBLISH topic name: nonempty, without NUL or wildcards (section 4.7.3).
 pub(crate) fn validate_topic_name(topic: &str) -> Result<(), BuildError> {
     if topic.is_empty() || topic.bytes().any(|b| matches!(b, 0 | b'+' | b'#')) {
         return Err(BuildError::InvalidTopic);
@@ -131,7 +131,7 @@ pub(crate) fn validate_topic_name(topic: &str) -> Result<(), BuildError> {
     Ok(())
 }
 
-/// Un filtre de SUBSCRIBE : `+` occupe un niveau entier, `#` est seul en dernier niveau (§4.7.1).
+/// A SUBSCRIBE filter: `+` occupies a whole level, `#` the final level (section 4.7.1).
 pub(crate) fn validate_topic_filter(filter: &str) -> Result<(), BuildError> {
     let b = filter.as_bytes();
     if b.is_empty() || b.contains(&0) {
@@ -150,7 +150,7 @@ pub(crate) fn validate_topic_filter(filter: &str) -> Result<(), BuildError> {
     Ok(())
 }
 
-/// Construit un paquet CONNECT (Clean Session) — fonction pure.
+/// Builds a CONNECT packet (Clean Session), without I/O.
 pub(crate) fn build_connect(
     client_id: &str,
     keep_alive_secs: u16,
@@ -204,10 +204,10 @@ pub(crate) fn build_connect(
     Ok(packet)
 }
 
-/// Construit l'en-tête d'un PUBLISH QoS 0 (octet fixe + remaining length + topic).
+/// Builds a QoS 0 PUBLISH header (fixed byte, remaining length and topic).
 ///
-/// Le payload n'est volontairement **pas** inclus : l'appelant l'envoie juste après,
-/// directement depuis son propre buffer (aucune copie, aucune limite de taille).
+/// The payload is deliberately **not** included: the caller sends it immediately
+/// afterwards directly from its own buffer, without copying or a buffer size limit.
 pub(crate) fn build_publish_header(
     topic: &str,
     payload_len: usize,
@@ -221,7 +221,7 @@ pub(crate) fn build_publish_header(
     Ok(packet)
 }
 
-/// Construit un paquet SUBSCRIBE en QoS 0 — fonction pure.
+/// Builds a QoS 0 SUBSCRIBE packet, without I/O.
 pub(crate) fn build_subscribe_packet(
     topic: &str,
     packet_id: u16,
@@ -243,7 +243,7 @@ pub(crate) fn build_subscribe_packet(
     Ok(packet)
 }
 
-/// Résultat de l'analyse d'un CONNACK.
+/// Result of parsing a CONNACK.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum ConnackResult {
     Accepted,
@@ -251,7 +251,7 @@ pub(crate) enum ConnackResult {
     Invalid,
 }
 
-/// Analyse un CONNACK de 4 octets — fonction pure.
+/// Parses a four-byte CONNACK, without I/O.
 pub(crate) fn parse_connack(p: &[u8; 4]) -> ConnackResult {
     // Octet 2 : bit 0 = Session Present, bits 1-7 réservés à 0.
     if p[0] != 0x20 || p[1] != 0x02 || p[2] & 0xFE != 0 {
@@ -263,7 +263,7 @@ pub(crate) fn parse_connack(p: &[u8; 4]) -> ConnackResult {
     }
 }
 
-/// Résultat de l'analyse d'un paquet SUBACK.
+/// Result of parsing a SUBACK packet.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum SubackResult {
     Accepted,
@@ -271,7 +271,7 @@ pub(crate) enum SubackResult {
     Invalid,
 }
 
-/// Analyse un SUBACK déjà lu en mémoire (une seule souscription) — fonction pure.
+/// Parses an in-memory SUBACK (one subscription), without I/O.
 pub(crate) fn parse_suback(header_byte: u8, body: &[u8], expected_id: u16) -> SubackResult {
     if header_byte != 0x90 || body.len() != 3 {
         return SubackResult::Invalid;
@@ -286,8 +286,8 @@ pub(crate) fn parse_suback(header_byte: u8, body: &[u8], expected_id: u16) -> Su
     }
 }
 
-/// Calcule la longueur du topic et l'offset de début du payload d'un PUBLISH
-/// déjà lu en mémoire — fonction pure, sans I/O.
+/// Computes the topic length and payload offset of an in-memory PUBLISH,
+/// without I/O.
 pub(crate) fn publish_layout(header_byte: u8, buf: &[u8]) -> Result<(usize, usize), ()> {
     if buf.len() < 2 {
         return Err(());
