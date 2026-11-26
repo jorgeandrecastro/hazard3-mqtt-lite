@@ -1,6 +1,5 @@
 # hazard3-mqtt-lite
-
-[![License](https://img.shields.io/badge/license-GPL--2.0--or--later-blue.svg)](LICENSE)
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/License-MIT%20or%20Apache--2.0-blue.svg)](https://opensource.org/licenses/MIT)
 [![no_std](https://img.shields.io/badge/no__std-yes-success.svg)](https://docs.rust-embedded.org/book/intro/no-std.html)
 
 A minimal, asynchronous, transport-independent **MQTT v3.1.1** client for
@@ -36,10 +35,10 @@ How to  use:
 
 ```toml
 [dependencies]
-hazard3-mqtt-lite =  "0.4"
+hazard3-mqtt-lite =  "0.5"
 
 # Or, with TLS 1.3:
-# hazard3-mqtt-lite = { version = "0.4", features = ["tls"] }
+# hazard3-mqtt-lite = { version = "0.5", features = ["tls"] }
 ```
 
 | Feature | Effect |
@@ -226,10 +225,16 @@ cargo test --features tls
 See [CHANGELOG.md](CHANGELOG.md) for release history. Issues and pull requests
 are welcome in the [repository](https://github.com/jorgeandrecastro/embassy-mqtt-lite).
 
-## License
+## 🛡️ License
 
-GPL-2.0-or-later. See [LICENSE](LICENSE).
+Licensed under either of:
 
-## Author
+    MIT license (http://opensource.org/licenses/MIT)
 
-Jorge Andre Castro — [georgeandrec@gmail.com](mailto:georgeandrec@gmail.com)
+    Apache License, Version 2.0 (http://www.apache.org/licenses/LICENSE-2.0)
+
+at your option.
+
+## 🦅 About
+
+Developed by Jorge Andre Castro.
